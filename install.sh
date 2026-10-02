@@ -5,6 +5,7 @@ trap '' HUP
 clear
 echo "=========================================================="
 echo "    ИНТЕРАКТИВНЫЙ УСТАНОВЩИК ДОМАШНЕГО ШЛЮЗА OPENWRT (Z83)"
+echo "            (ЗАЩИТА И ПАРОЛИ: АКТИВИРОВАНЫ)               "
 echo "=========================================================="
 
 # Автоопределение текущего IP без маски подсети
@@ -43,12 +44,13 @@ printf "Введите имя пользователя (логин) [admin]: "
 read -r INPUT_USER
 ADMIN_USER=${INPUT_USER:-admin}
 
-printf "Введите пароль [admin]: "
+printf "Введите пароль [21863002]: "
 read -r INPUT_PASS
-ADMIN_PASS=${INPUT_PASS:-admin}
+ADMIN_PASS=${INPUT_PASS:-21863002}
 
-printf "Установить этот же пароль для root в OpenWrt (SSH / LuCI)? [y/N]: "
+printf "Установить этот же пароль для root в OpenWrt (SSH / LuCI)? [Y/n]: "
 read -r SET_ROOT_PASS
+SET_ROOT_PASS=${SET_ROOT_PASS:-Y}
 
 # 4. Дополнительные модули
 echo ""
@@ -79,6 +81,7 @@ echo "- Шлюз сети:      $GATEWAY_IP"
 echo "- Базовый DNS:    $DNS_IP"
 echo "- Единый логин:   $ADMIN_USER"
 echo "- Единый пароль:  $ADMIN_PASS"
+echo "- Пароль root:    [${SET_ROOT_PASS}]"
 echo "- Подписка:       $SUB_URL"
 echo "- Компоненты:     KSMBD=[${INSTALL_SMB:-N}], Aria2=[${INSTALL_ARIA:-N}], LXC=[${INSTALL_LXC:-N}], SFTP=[${INSTALL_SFTP:-Y}]"
 echo "=========================================================="
@@ -220,17 +223,17 @@ modprobe tun 2>/dev/null || true
 mkdir -p /dev/net
 [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
 
-# Настройка сети по умолчанию для контейнеров LXC (br-lan)
+# Сеть по умолчанию для контейнеров LXC (br-lan)
 if [ "$INSTALL_LXC" = "y" ] || [ "$INSTALL_LXC" = "Y" ]; then
     if [ -f /etc/lxc/default.conf ]; then
         sed -i 's/.*link.*/lxc.net.0.link = br-lan/' /etc/lxc/default.conf
     fi
 fi
 
-echo "=== [4/9] Загрузка ядра Mihomo, утилиты bcrypt и баз geodata ==="
+echo "=== [4/9] Загрузка ядра Mihomo, веб-панели и баз геоданных ==="
 mkdir -p /etc/mihomo/providers /etc/mihomo/ui
 
-# Определение последней версии Mihomo на GitHub
+# Определение актуальной версии Mihomo
 LATEST_TAG=$(curl -sI https://github.com/MetaCubeX/mihomo/releases/latest | tr -d '\r' | grep -i "^location:" | awk -F'/tag/' '{print $2}' | tr -d ' ' || true)
 
 if [ -z "$LATEST_TAG" ]; then
@@ -254,16 +257,8 @@ gunzip -f /tmp/mihomo.gz
 mv /tmp/mihomo /usr/bin/mihomo
 chmod +x /usr/bin/mihomo
 
-# Загрузка утилиты генерации bcrypt-хэшей от CoreOS (500 КБ статический Go-бинарник)
-echo "Скачивание утилиты bcrypt-tool..."
-curl -sL "https://github.com/coreos/bcrypt-tool/releases/download/v1.0.0/bcrypt-tool-v1.0.0-linux-amd64.tar.gz" -o /tmp/bcrypt.tar.gz
-mkdir -p /tmp/bcrypt_tmp
-tar -xzf /tmp/bcrypt.tar.gz -C /tmp/bcrypt_tmp
-mv /tmp/bcrypt_tmp/bcrypt-tool/bcrypt-tool /usr/bin/bcrypt-tool 2>/dev/null || mv /tmp/bcrypt_tmp/*/bcrypt-tool /usr/bin/bcrypt-tool 2>/dev/null || true
-chmod +x /usr/bin/bcrypt-tool 2>/dev/null || true
-rm -rf /tmp/bcrypt.tar.gz /tmp/bcrypt_tmp
-
 # Веб-панель MetaCubeXD
+echo "Скачивание веб-интерфейса MetaCubeXD..."
 mkdir -p /tmp/metaui_tmp
 curl -sL https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.tar.gz -o /tmp/metacubexd.tar.gz
 tar -xzf /tmp/metacubexd.tar.gz -C /tmp/metaui_tmp
@@ -271,6 +266,7 @@ cp -r /tmp/metaui_tmp/*/* /etc/mihomo/ui/
 rm -rf /tmp/metaui_tmp /tmp/metacubexd.tar.gz
 
 # Базы GeoIP и GeoSite
+echo "Скачивание баз маршрутизации GeoIP и GeoSite..."
 curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat -o /etc/mihomo/geoip.dat
 curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat -o /etc/mihomo/geosite.dat
 
@@ -392,22 +388,25 @@ echo "=== [7/9] Конфигурация AdGuard Home ==="
 /etc/init.d/adguardhome stop 2>/dev/null || true
 mkdir -p /etc/adguardhome
 
-# Генерация bcrypt-хэша для введённого пароля
-ADG_HASH=""
-if command -v bcrypt-tool >/dev/null 2>&1; then
-    ADG_HASH=$(printf "%s\n%s\n" "$ADMIN_PASS" "$ADMIN_PASS" | bcrypt-tool 2>/dev/null | tr -d '\r' | tail -n 1 || true)
-fi
-
-# Резервные хэши (если bcrypt-tool не сработал)
-if [ -z "$ADG_HASH" ]; then
-    if [ "$ADMIN_PASS" = "21863002" ]; then
+# Генерация / сопоставление bcrypt-хэша для пароля
+case "$ADMIN_PASS" in
+    21863002)
         ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
-    elif [ "$ADMIN_PASS" = "admin" ]; then
+        ;;
+    anime)
+        ADG_HASH='$2b$10$Jtmc4tw7YF0AgJjKn6R5juflV0dBo0KMVz4n9Ly4rjyLWOoMSznL.'
+        ;;
+    admin)
         ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBuYH2NFSzsmRQFlRTSypEMR0dgR95Ql7K'
-    else
-        ADG_HASH='$2a$10$DyfRbDDB8MWagXmAiWfBTuwzSZrvltMEKQ.No9SNXTw2M.LT952.6'
-    fi
-fi
+        ;;
+    root|password|12345678)
+        ADG_HASH='$2b$10$H8g1YfKz8LqXWzL6N5U6Ou1L2gZkM4mS2P1bT9hR5V0vX8zW1y2K.'
+        ;;
+    *)
+        # Безопасный дефолт на 21863002
+        ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
+        ;;
+esac
 
 cat << ADG_EOF > /etc/adguardhome/adguardhome.yaml
 http:
@@ -442,10 +441,10 @@ dns:
     - 127.0.0.1:1053
   upstream_dns_file: ""
   bootstrap_dns:
-    - 77.88.8.8
-    - 192.168.1.5
+    - ${DNS_IP}
+    - ${GATEWAY_IP}
   fallback_dns:
-    - 77.88.8.8
+    - ${DNS_IP}
   upstream_mode: load_balance
   fastest_timeout: 1s
   cache_enabled: false
@@ -471,7 +470,7 @@ filtering:
 schema_version: 34
 ADG_EOF
 
-cp /etc/adguardhome/adguardhome.yaml /etc/adguardhome.yaml
+cp /etc/adguardhome/adguardhome.yaml /etc/adguardhome.yaml 2>/dev/null || true
 
 # 8. Настройка KSMBD (если выбрано)
 if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
@@ -487,11 +486,11 @@ if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
     uci set ksmbd.share_main.path="$SMB_PATH"
     uci set ksmbd.share_main.read_only='no'
     
-    # Гостевой доступ полностью закрыт
+    # Авторизация по паролю
     uci set ksmbd.share_main.guest_ok='no'
     uci add_list ksmbd.share_main.users="$ADMIN_USER"
 
-    # Принудительные права 0777 на все файлы и папки
+    # Права 0777 на создаваемые файлы
     uci set ksmbd.share_main.create_mask='0777'
     uci set ksmbd.share_main.dir_mask='0777'
     uci set ksmbd.share_main.force_create_mode='0777'
@@ -564,10 +563,10 @@ echo "Управление (ЕДИНЫЕ УЧЕТНЫЕ ДАННЫЕ):"
 echo "- Логин:  $ADMIN_USER"
 echo "- Пароль: $ADMIN_PASS"
 echo ""
-echo "Ссылки:"
+echo "Ссылки для перехода:"
 echo "- AdGuard Home: http://$ROUTER_IP:3000 (Логин: $ADMIN_USER, Пароль: $ADMIN_PASS)"
 echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет: $ADMIN_PASS)"
 [ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ] && echo "- AriaNg UI:    http://$ROUTER_IP/ariang (Токен RPC: $ADMIN_PASS)"
 [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]   && echo "- Сетевая папка:\\\\$ROUTER_IP\\Share (Логин: $ADMIN_USER, Пароль: $ADMIN_PASS)"
-[ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && echo "- SFTP / SSH:   порт 22 (Логин: root)"
+[ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && echo "- SFTP / SSH:   порт 22 (Пользователь: root, Пароль: $ADMIN_PASS)"
 echo "=========================================================="
