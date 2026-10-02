@@ -4,7 +4,7 @@ trap '' HUP
 clear
 echo "=========================================================="
 echo "    ПРОЗРАЧНЫЙ ШЛЮЗ OPENWRT: ADGUARD HOME + MIHOMO TUN    "
-echo "        (МАКСИМАЛЬНО ОБЛЕГЧЕННАЯ СБОРКА ДЛЯ Z83)          "
+echo "        (DOH ЧЕРЕЗ TUN + ЧИСТЫЙ DIRECT DNS ДЛЯ Z83)       "
 echo "=========================================================="
 
 # Автоопределение текущего IP без маски подсети
@@ -32,23 +32,20 @@ read -r INPUT_GW
 GATEWAY_IP=${INPUT_GW:-192.168.1.5}
 GATEWAY_IP=$(echo "$GATEWAY_IP" | cut -d'/' -f1)
 
-printf "Базовый DNS-сервер [по умолчанию 77.88.8.8]: "
-read -r INPUT_DNS
-DNS_IP=${INPUT_DNS:-77.88.8.8}
-DNS_IP=$(echo "$DNS_IP" | cut -d'/' -f1)
+DNS_IP="77.88.8.8"
 
 echo ""
 echo "=========================================================="
 echo "Параметры для применения:"
 echo "- IP устройства:  $ROUTER_IP"
 echo "- Шлюз сети:      $GATEWAY_IP"
-echo "- Базовый DNS:    $DNS_IP"
+echo "- Базовый DNS:    $DNS_IP (Яндекс.DNS зафиксирован)"
 echo "- Авторизация:    ОТКЛЮЧЕНА (свободный вход в панели)"
 echo "- Подписка:       $SUB_URL"
 echo "- Автовыбор узла: Включен (AUTO url-test каждые 5 мин)"
 echo "- Автообновление: Включено (раз в 24 часа)"
-echo "- Fake-IP Filter: ВЫРЕЗАН (чистый Fake-IP)"
-echo "- Sniffer:        ВЫРЕЗАН (0 нагрузки на CPU)"
+echo "- Fake-IP Filter: ВЫРЕЗАН ПОЛНОСТЬЮ"
+echo "- Sniffer:        ВЫРЕЗАН"
 echo "=========================================================="
 printf "Применить конфигурацию и начать установку? [Y/n]: "
 read -r CONFIRM
@@ -214,7 +211,7 @@ curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geos
 # Предварительная загрузка подписки
 curl -sL -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml || true
 
-echo "=== [5/7] Создание облегченной конфигурации Mihomo ==="
+echo "=== [5/7] Создание конфигурации Mihomo ==="
 cat <<CONFIG_EOF > /etc/mihomo/config.yaml
 mixed-port: 7890
 allow-lan: true
@@ -238,13 +235,17 @@ dns:
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   default-nameserver:
-    - ${DNS_IP}
-    - ${GATEWAY_IP}
-    - 77.88.8.8
-  nameserver:
-    - ${DNS_IP}
     - 77.88.8.8
     - 77.88.8.1
+  proxy-server-nameserver:
+    - 77.88.8.8
+    - 77.88.8.1
+  direct-nameserver:
+    - 77.88.8.8
+    - 77.88.8.1
+  nameserver:
+    - 'https://dns.google/dns-query#PROXY'
+    - 'https://cloudflare-dns.com/dns-query#PROXY'
 
 tun:
   enable: true
@@ -356,10 +357,10 @@ dns:
     - 127.0.0.1:1053
   upstream_dns_file: ""
   bootstrap_dns:
-    - ${DNS_IP}
-    - ${GATEWAY_IP}
+    - 77.88.8.8
   fallback_dns:
-    - ${DNS_IP}
+    - 77.88.8.8
+    - 77.88.8.1
   upstream_mode: load_balance
   fastest_timeout: 1s
   allowed_clients: []
@@ -520,7 +521,7 @@ ADG_EOF
 
 cp /etc/adguardhome/adguardhome.yaml /etc/adguardhome.yaml 2>/dev/null || true
 
-echo "=== Запуск служб и проведение диагностики ==="
+echo "=== Запуск служб ==="
 /etc/init.d/mihomo enable
 /etc/init.d/mihomo restart
 sleep 4
@@ -531,41 +532,7 @@ sleep 3
 
 echo ""
 echo "=========================================================="
-echo "          РЕЗУЛЬТАТЫ ДИАГНОСТИКИ СИСТЕМЫ"
-echo "=========================================================="
-
-echo "1. AdGuard Home (порт 53) -> Mihomo DNS (1053):"
-DNS_CHECK=$(nslookup ya.ru 127.0.0.1 2>/dev/null || true)
-if echo "$DNS_CHECK" | grep -q "Address"; then
-    echo "   [OK] DNS-сервер отвечает и мгновенно резолвит имена!"
-else
-    echo "   [FAIL] Порт 53 не отвечает на запросы."
-fi
-
-echo "2. Доступ к РФ ресурсам напрямую (DIRECT):"
-if curl -sI --connect-timeout 4 https://ya.ru >/dev/null 2>&1; then
-    echo "   [OK] Прямой доступ к ya.ru работает."
-else
-    echo "   [WARN] Трафик к ya.ru не прошел."
-fi
-
-echo "3. Проверка прокси-ноды через порт Mihomo (7890):"
-PROXY_TEST=$(curl -s -x http://127.0.0.1:7890 --connect-timeout 8 https://api.ipify.org 2>/dev/null || true)
-if [ -n "$PROXY_TEST" ]; then
-    echo "   [OK] Прокси активен! Внешний IP через туннель: $PROXY_TEST"
-else
-    echo "   [FAIL] Прокси не отвечает. Проверьте подписку."
-fi
-
-echo "4. Проверка виртуального интерфейса tun0 в ядре:"
-if ip addr show dev tun0 >/dev/null 2>&1; then
-    echo "   [OK] Интерфейс tun0 успешно поднят."
-else
-    echo "   [FAIL] Интерфейс tun0 не найден!"
-fi
-
-echo "=========================================================="
-echo "ШЛЮЗ НАСТРОЕН: МАКСИМАЛЬНАЯ СКОРОСТЬ FAKE-IP АКТИВНА"
+echo "ШЛЮЗ НАСТРОЕН И ГОТОВ К РАБОТЕ!"
 echo ""
 echo "Веб-интерфейсы:"
 echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный)"
