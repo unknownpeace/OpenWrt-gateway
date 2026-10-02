@@ -227,9 +227,10 @@ if [ "$INSTALL_LXC" = "y" ] || [ "$INSTALL_LXC" = "Y" ]; then
     fi
 fi
 
-echo "=== [4/9] Автоопределение и скачивание последней версии Mihomo ==="
+echo "=== [4/9] Загрузка ядра Mihomo, утилиты bcrypt и баз geodata ==="
 mkdir -p /etc/mihomo/providers /etc/mihomo/ui
 
+# Определение последней версии Mihomo на GitHub
 LATEST_TAG=$(curl -sI https://github.com/MetaCubeX/mihomo/releases/latest | tr -d '\r' | grep -i "^location:" | awk -F'/tag/' '{print $2}' | tr -d ' ' || true)
 
 if [ -z "$LATEST_TAG" ]; then
@@ -252,6 +253,15 @@ fi
 gunzip -f /tmp/mihomo.gz
 mv /tmp/mihomo /usr/bin/mihomo
 chmod +x /usr/bin/mihomo
+
+# Загрузка утилиты генерации bcrypt-хэшей от CoreOS (500 КБ статический Go-бинарник)
+echo "Скачивание утилиты bcrypt-tool..."
+curl -sL "https://github.com/coreos/bcrypt-tool/releases/download/v1.0.0/bcrypt-tool-v1.0.0-linux-amd64.tar.gz" -o /tmp/bcrypt.tar.gz
+mkdir -p /tmp/bcrypt_tmp
+tar -xzf /tmp/bcrypt.tar.gz -C /tmp/bcrypt_tmp
+mv /tmp/bcrypt_tmp/bcrypt-tool/bcrypt-tool /usr/bin/bcrypt-tool 2>/dev/null || mv /tmp/bcrypt_tmp/*/bcrypt-tool /usr/bin/bcrypt-tool 2>/dev/null || true
+chmod +x /usr/bin/bcrypt-tool 2>/dev/null || true
+rm -rf /tmp/bcrypt.tar.gz /tmp/bcrypt_tmp
 
 # Веб-панель MetaCubeXD
 mkdir -p /tmp/metaui_tmp
@@ -382,13 +392,21 @@ echo "=== [7/9] Конфигурация AdGuard Home ==="
 /etc/init.d/adguardhome stop 2>/dev/null || true
 mkdir -p /etc/adguardhome
 
-# Генерация / подстановка bcrypt-хэша для пароля AdGuard Home
-if [ "$ADMIN_PASS" = "21863002" ]; then
-    ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
-elif [ "$ADMIN_PASS" = "admin" ]; then
-    ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBuYH2NFSzsmRQFlRTSypEMR0dgR95Ql7K'
-else
-    ADG_HASH='$2a$10$DyfRbDDB8MWagXmAiWfBTuwzSZrvltMEKQ.No9SNXTw2M.LT952.6'
+# Генерация bcrypt-хэша для введённого пароля
+ADG_HASH=""
+if command -v bcrypt-tool >/dev/null 2>&1; then
+    ADG_HASH=$(printf "%s\n%s\n" "$ADMIN_PASS" "$ADMIN_PASS" | bcrypt-tool 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+fi
+
+# Резервные хэши (если bcrypt-tool не сработал)
+if [ -z "$ADG_HASH" ]; then
+    if [ "$ADMIN_PASS" = "21863002" ]; then
+        ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
+    elif [ "$ADMIN_PASS" = "admin" ]; then
+        ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBuYH2NFSzsmRQFlRTSypEMR0dgR95Ql7K'
+    else
+        ADG_HASH='$2a$10$DyfRbDDB8MWagXmAiWfBTuwzSZrvltMEKQ.No9SNXTw2M.LT952.6'
+    fi
 fi
 
 cat << ADG_EOF > /etc/adguardhome/adguardhome.yaml
@@ -461,7 +479,6 @@ if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
     mkdir -p "$SMB_PATH"
     chmod -R 777 "$SMB_PATH"
 
-    # Автоматическая передача пароля без ручного ввода
     printf "%s\n%s\n" "$ADMIN_PASS" "$ADMIN_PASS" | ksmbd.adduser -a "$ADMIN_USER" 2>/dev/null || ksmbd.adduser -a "$ADMIN_USER"
 
     uci delete ksmbd.share_main 2>/dev/null || true
