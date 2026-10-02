@@ -4,8 +4,8 @@ trap '' HUP
 
 clear
 echo "=========================================================="
-echo "    ИНТЕРАКТИВНЫЙ УСТАНОВЩИК ДОМАШНЕГО ШЛЮЗА OPENWRT (Z83)"
-echo "               (РЕЖИМ БЕЗ АВТОРИЗАЦИИ / NO-AUTH)          "
+echo "    ПРОЗРАЧНЫЙ ШЛЮЗ OPENWRT: ADGUARD HOME + MIHOMO TUN    "
+echo "               (МИНИМАЛЬНАЯ СБОРКА Z83)                   "
 echo "=========================================================="
 
 # Автоопределение текущего IP без маски подсети
@@ -22,7 +22,7 @@ SUB_URL=${INPUT_SUB_URL:-$DEFAULT_SUB_URL}
 
 # 2. Сетевые параметры
 echo ""
-echo "--- [2/2] Сетевые параметры ---"
+echo "--- [2/2] Сетевые параметры шлюза ---"
 printf "IP-адрес этого OpenWrt [по умолчанию $DETECTED_IP]: "
 read -r INPUT_IP
 ROUTER_IP=${INPUT_IP:-$DETECTED_IP}
@@ -38,45 +38,23 @@ read -r INPUT_DNS
 DNS_IP=${INPUT_DNS:-77.88.8.8}
 DNS_IP=$(echo "$DNS_IP" | cut -d'/' -f1)
 
-# 3. Дополнительные модули
-echo ""
-echo "--- Выбор дополнительных компонентов ---"
-printf "Установить сетевую папку KSMBD (гостевой доступ без пароля)? [y/N]: "
-read -r INSTALL_SMB
-
-if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
-    printf "  -> Путь к общей папке [/mnt/share]: "
-    read -r INPUT_SMB_PATH
-    SMB_PATH=${INPUT_SMB_PATH:-/mnt/share}
-fi
-
-printf "Установить качалку торрентов Aria2 + веб-панель AriaNg (без пароля)? [y/N]: "
-read -r INSTALL_ARIA
-
-printf "Установить контейнеры LXC (lxc, luci-app-lxc)? [y/N]: "
-read -r INSTALL_LXC
-
-printf "Установить SFTP-сервер (для WinSCP / FileZilla)? [Y/n]: "
-read -r INSTALL_SFTP
-
 echo ""
 echo "=========================================================="
 echo "Параметры для применения:"
 echo "- IP устройства:  $ROUTER_IP"
 echo "- Шлюз сети:      $GATEWAY_IP"
 echo "- Базовый DNS:    $DNS_IP"
-echo "- Авторизация:    ОТКЛЮЧЕНА ВЕЗДЕ (свободный доступ)"
+echo "- Авторизация:    ОТКЛЮЧЕНА (свободный вход в панели)"
 echo "- Подписка:       $SUB_URL"
 echo "- Автовыбор узла: Включен (AUTO url-test каждые 5 мин)"
 echo "- Автообновление: Включено (раз в 24 часа)"
-echo "- Компоненты:     KSMBD=[${INSTALL_SMB:-N}], Aria2=[${INSTALL_ARIA:-N}], LXC=[${INSTALL_LXC:-N}], SFTP=[${INSTALL_SFTP:-Y}]"
 echo "=========================================================="
 printf "Применить конфигурацию и начать установку? [Y/n]: "
 read -r CONFIRM
 [ "$CONFIRM" = "n" ] || [ "$CONFIRM" = "N" ] && exit 0
 
 echo ""
-echo "=== [1/9] Настройка ядра Linux для работы в одной подсети ==="
+echo "=== [1/7] Настройка ядра Linux для маршрутизации ==="
 sysctl -w net.ipv4.ip_forward=1
 sysctl -w net.ipv4.conf.all.send_redirects=0
 sysctl -w net.ipv4.conf.default.send_redirects=0
@@ -99,7 +77,7 @@ SYS_EOF
 # Сброс пароля root для входа без пароля
 passwd -d root 2>/dev/null || true
 
-echo "=== [2/9] Применение сетевых настроек и устранение конфликтов DHCP ==="
+echo "=== [2/7] Применение сетевых настроек и устранение конфликтов DHCP ==="
 killall udhcpc 2>/dev/null || true
 
 uci set network.lan.proto='static'
@@ -113,6 +91,7 @@ uci add_list network.lan.dns="$GATEWAY_IP"
 uci delete network.wan 2>/dev/null || true
 uci delete network.wan6 2>/dev/null || true
 
+# Отключение DHCP и IPv6 RA на шлюзе
 uci set dhcp.lan.ignore='1'
 uci set dhcp.lan.dhcpv6='disabled'
 uci set dhcp.lan.ra='disabled'
@@ -186,13 +165,8 @@ else
     echo "Предупреждение: Шлюз не ответил на ICMP, продолжаем установку..."
 fi
 
-echo "=== [3/9] Установка пакетов ==="
+echo "=== [3/7] Установка пакетов ядра и AdGuard Home ==="
 PACKAGES="curl ca-certificates kmod-tun adguardhome"
-
-[ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && PACKAGES="$PACKAGES openssh-sftp-server"
-[ "$INSTALL_LXC" = "y" ] || [ "$INSTALL_LXC" = "Y" ] && PACKAGES="$PACKAGES lxc luci-app-lxc luci-i18n-lxc-ru kmod-veth"
-[ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ] && PACKAGES="$PACKAGES aria2 luci-app-aria2 luci-i18n-aria2-ru ariang"
-[ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ] && PACKAGES="$PACKAGES ksmbd-server luci-app-ksmbd luci-i18n-ksmbd-ru"
 
 if command -v apk >/dev/null 2>&1; then
     apk update || true
@@ -206,14 +180,7 @@ modprobe tun 2>/dev/null || true
 mkdir -p /dev/net
 [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
 
-# Сеть по умолчанию для контейнеров LXC (br-lan)
-if [ "$INSTALL_LXC" = "y" ] || [ "$INSTALL_LXC" = "Y" ]; then
-    if [ -f /etc/lxc/default.conf ]; then
-        sed -i 's/.*link.*/lxc.net.0.link = br-lan/' /etc/lxc/default.conf
-    fi
-fi
-
-echo "=== [4/9] Загрузка ядра Mihomo, веб-панели и баз геоданных ==="
+echo "=== [4/7] Загрузка ядра Mihomo, веб-панели и баз геоданных ==="
 mkdir -p /etc/mihomo/providers /etc/mihomo/ui
 
 # Определение актуальной версии Mihomo
@@ -256,7 +223,7 @@ curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geos
 # Предварительная загрузка подписки
 curl -sL -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml
 
-echo "=== [5/9] Создание конфигурации Mihomo (Без секрета) ==="
+echo "=== [5/7] Создание конфигурации Mihomo (Без секрета) ==="
 cat <<CONFIG_EOF > /etc/mihomo/config.yaml
 mixed-port: 7890
 allow-lan: true
@@ -356,7 +323,7 @@ rules:
   - MATCH,PROXY
 CONFIG_EOF
 
-echo "=== [6/9] Создание службы init.d для Mihomo ==="
+echo "=== [6/7] Создание службы init.d для Mihomo ==="
 cat <<'INIT_EOF' > /etc/init.d/mihomo
 #!/bin/sh /etc/rc.common
 
@@ -379,7 +346,7 @@ start_service() {
 INIT_EOF
 chmod +x /etc/init.d/mihomo
 
-echo "=== [7/9] Конфигурация AdGuard Home (Без пользователей) ==="
+echo "=== [7/7] Конфигурация AdGuard Home (Вход свободный) ==="
 /etc/init.d/adguardhome stop 2>/dev/null || true
 mkdir -p /etc/adguardhome
 
@@ -445,36 +412,7 @@ ADG_EOF
 
 cp /etc/adguardhome/adguardhome.yaml /etc/adguardhome.yaml 2>/dev/null || true
 
-# 8. Настройка KSMBD (если выбрано)
-if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
-    echo "=== [8/9] Настройка KSMBD (Гостевой доступ без пароля) ==="
-    mkdir -p "$SMB_PATH"
-    chmod -R 777 "$SMB_PATH"
-
-    uci delete ksmbd.share_main 2>/dev/null || true
-    uci set ksmbd.share_main=share
-    uci set ksmbd.share_main.name='Share'
-    uci set ksmbd.share_main.path="$SMB_PATH"
-    uci set ksmbd.share_main.read_only='no'
-    
-    # Гостевой доступ без учетных записей
-    uci set ksmbd.share_main.guest_ok='yes'
-    uci delete ksmbd.share_main.users 2>/dev/null || true
-
-    # Права 0777
-    uci set ksmbd.share_main.create_mask='0777'
-    uci set ksmbd.share_main.dir_mask='0777'
-    uci set ksmbd.share_main.force_create_mode='0777'
-    uci set ksmbd.share_main.force_directory_mode='0777'
-
-    uci commit ksmbd
-    /etc/init.d/ksmbd enable 2>/dev/null || true
-    /etc/init.d/ksmbd restart 2>/dev/null || true
-else
-    echo "=== [8/9] Пропуск настройки KSMBD ==="
-fi
-
-echo "=== [9/9] Запуск всех служб и проведение диагностики ==="
+echo "=== Запуск служб и проведение диагностики ==="
 /etc/init.d/mihomo enable
 /etc/init.d/mihomo restart
 sleep 4
@@ -482,19 +420,6 @@ sleep 4
 /etc/init.d/adguardhome enable 2>/dev/null || true
 /etc/init.d/adguardhome restart 2>/dev/null || true
 sleep 3
-
-# Настройка и запуск Aria2 (без токена RPC)
-if [ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ]; then
-    uci set aria2.main.enabled='1'
-    uci set aria2.main.dir="${SMB_PATH:-/mnt/share}"
-    uci set aria2.main.enable_rpc='1'
-    uci delete aria2.main.rpc_secret 2>/dev/null || true
-    uci delete aria2.main.rpc_auth_method 2>/dev/null || true
-    uci set aria2.main.rpc_auth_method='none'
-    uci commit aria2
-    /etc/init.d/aria2 enable 2>/dev/null || true
-    /etc/init.d/aria2 restart 2>/dev/null || true
-fi
 
 echo ""
 echo "=========================================================="
@@ -532,14 +457,12 @@ else
 fi
 
 echo "=========================================================="
-echo "ВСЕ СЛУЖБЫ НАСТРОЕНЫ БЕЗ ПАРОЛЕЙ И АВТОРИЗАЦИИ:"
+echo "ШЛЮЗ ПОЛНОСТЬЮ НАСТРОЕН И ГОТОВ К РАБОТЕ:"
 echo ""
-echo "Ссылки для перехода:"
-echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, пароль отключен)"
+echo "Веб-интерфейсы:"
+echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, без пароля)"
 echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет пустой, подключается сразу)"
 echo "                * Группа PROXY: по умолчанию активен 'AUTO' (автовыбор),"
 echo "                * Ручной выбор: просто кликните на нужный сервер в списке."
-[ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ] && echo "- AriaNg UI:    http://$ROUTER_IP/ariang (Токен RPC пустой)"
-[ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]   && echo "- Сетевая папка:\\\\$ROUTER_IP\\Share (Гостевой доступ без логина и пароля)"
-[ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && echo "- SFTP / SSH:   порт 22 (Пользователь: root, пароль пустой)"
+echo "- SSH / Консоль: порт 22 (Пользователь: root, пароль пустой)"
 echo "=========================================================="
