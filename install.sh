@@ -1,5 +1,4 @@
 #!/bin/sh
-set -e
 trap '' HUP
 
 clear
@@ -63,6 +62,8 @@ sysctl -w net.ipv4.conf.all.accept_redirects=0
 sysctl -w net.ipv4.conf.default.accept_redirects=0
 sysctl -w net.ipv4.conf.all.rp_filter=2
 sysctl -w net.ipv4.conf.default.rp_filter=2
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sysctl -w net.ipv6.conf.default.disable_ipv6=1
 
 mkdir -p /etc/sysctl.d
 cat << 'SYS_EOF' > /etc/sysctl.d/99-gateway-tun.conf
@@ -73,6 +74,8 @@ net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
 SYS_EOF
 
 passwd -d root 2>/dev/null || true
@@ -163,14 +166,8 @@ fi
 
 echo "=== [3/7] Установка пакетов ядра и AdGuard Home ==="
 PACKAGES="curl ca-certificates kmod-tun adguardhome"
-
-if command -v apk >/dev/null 2>&1; then
-    apk update || true
-    apk add $PACKAGES || true
-else
-    opkg update || true
-    opkg install $PACKAGES || true
-fi
+apk update || true
+apk add $PACKAGES || true
 
 modprobe tun 2>/dev/null || true
 mkdir -p /dev/net
@@ -180,11 +177,9 @@ echo "=== [4/7] Загрузка ядра Mihomo, веб-панели и баз 
 mkdir -p /etc/mihomo/providers /etc/mihomo/ui
 
 LATEST_TAG=$(curl -sI https://github.com/MetaCubeX/mihomo/releases/latest | tr -d '\r' | grep -i "^location:" | awk -F'/tag/' '{print $2}' | tr -d ' ' || true)
-
 if [ -z "$LATEST_TAG" ]; then
     LATEST_TAG=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
 fi
-
 LATEST_TAG=${LATEST_TAG:-v1.19.32}
 echo "Актуальная версия Mihomo: $LATEST_TAG"
 
@@ -212,11 +207,11 @@ rm -rf /tmp/metaui_tmp /tmp/metacubexd.tar.gz
 
 # Базы GeoIP и GeoSite
 echo "Скачивание баз маршрутизации GeoIP и GeoSite..."
-curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat -o /etc/mihomo/geoip.dat
-curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat -o /etc/mihomo/geosite.dat
+curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat -o /etc/mihomo/geoip.dat || true
+curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat -o /etc/mihomo/geosite.dat || true
 
 # Предварительная загрузка подписки
-curl -sL -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml
+curl -sL -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml || true
 
 echo "=== [5/7] Создание конфигурации Mihomo (Без секрета) ==="
 cat <<CONFIG_EOF > /etc/mihomo/config.yaml
@@ -241,6 +236,13 @@ dns:
   listen: 127.0.0.1:1053
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "geosite:category-ru"
+    - "+.ru"
+    - "+.su"
+    - "+.xn--p1ai"
+    - "router.lan"
+    - "openwrt.lan"
   default-nameserver:
     - ${DNS_IP}
     - ${GATEWAY_IP}
@@ -309,6 +311,7 @@ proxy-groups:
     lazy: false
 
 rules:
+  - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
   - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
@@ -588,7 +591,7 @@ else
 fi
 
 echo "=========================================================="
-echo "ШЛЮЗ ПОЛНОСТЬЮ НАСТРОЕН И ЗАЩИЩЕН:"
+echo "ШЛЮЗ НАСТРОЕН:"
 echo ""
 echo "Веб-интерфейсы:"
 echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, правила активны)"
