@@ -48,6 +48,7 @@ echo "- Авторизация:    ОТКЛЮЧЕНА (свободный вхо
 echo "- Подписка:       $SUB_URL"
 echo "- Автовыбор узла: Включен (AUTO url-test каждые 5 мин)"
 echo "- Автообновление: Включено (раз в 24 часа)"
+echo "- Правила AdGuard: AniLibria, AniLiberty, Whoer включены"
 echo "=========================================================="
 printf "Применить конфигурацию и начать установку? [Y/n]: "
 read -r CONFIRM
@@ -74,7 +75,6 @@ net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 SYS_EOF
 
-# Сброс пароля root для входа без пароля
 passwd -d root 2>/dev/null || true
 
 echo "=== [2/7] Применение сетевых настроек и устранение конфликтов DHCP ==="
@@ -91,23 +91,19 @@ uci add_list network.lan.dns="$GATEWAY_IP"
 uci delete network.wan 2>/dev/null || true
 uci delete network.wan6 2>/dev/null || true
 
-# Отключение DHCP и IPv6 RA на шлюзе
 uci set dhcp.lan.ignore='1'
 uci set dhcp.lan.dhcpv6='disabled'
 uci set dhcp.lan.ra='disabled'
 uci set dhcp.lan.ndp='disabled'
 uci delete network.lan.ip6assign 2>/dev/null || true
 
-# Masquerade и MSS Clamping
 uci set firewall.@zone[0].forward='ACCEPT'
 uci set firewall.@zone[0].output='ACCEPT'
 uci set firewall.@zone[0].masq='1'
 uci set firewall.@zone[0].mtu_fix='1'
 
-# Смещаем dnsmasq на порт 54 под AdGuard
 uci set dhcp.@dnsmasq[0].port='54'
 
-# Регистрация виртуального интерфейса tun0 в OpenWrt
 uci set network.mihomo_tun=interface
 uci set network.mihomo_tun.proto='none'
 uci set network.mihomo_tun.device='tun0'
@@ -183,7 +179,6 @@ mkdir -p /dev/net
 echo "=== [4/7] Загрузка ядра Mihomo, веб-панели и баз геоданных ==="
 mkdir -p /etc/mihomo/providers /etc/mihomo/ui
 
-# Определение актуальной версии Mihomo
 LATEST_TAG=$(curl -sI https://github.com/MetaCubeX/mihomo/releases/latest | tr -d '\r' | grep -i "^location:" | awk -F'/tag/' '{print $2}' | tr -d ' ' || true)
 
 if [ -z "$LATEST_TAG" ]; then
@@ -346,7 +341,7 @@ start_service() {
 INIT_EOF
 chmod +x /etc/init.d/mihomo
 
-echo "=== [7/7] Конфигурация AdGuard Home (Вход свободный) ==="
+echo "=== [7/7] Конфигурация AdGuard Home (С пользовательскими правилами) ==="
 /etc/init.d/adguardhome stop 2>/dev/null || true
 mkdir -p /etc/adguardhome
 
@@ -400,6 +395,11 @@ dns:
 filtering:
   protection_enabled: true
   blocking_mode: default
+  user_rules:
+    - "@@||whoer.net^$important"
+    - "@@||aniliberty.top^$important"
+    - "@@||anilibria.top^$important"
+    - "@@||*.libria.fun^$important"
   rewrites:
     - domain: router.lan
       answer: ${GATEWAY_IP}
@@ -457,12 +457,10 @@ else
 fi
 
 echo "=========================================================="
-echo "ШЛЮЗ ПОЛНОСТЬЮ НАСТРОЕН И ГОТОВ К РАБОТЕ:"
+echo "ШЛЮЗ ПОЛНОСТЬЮ НАСТРОЕН И ЗАЩИЩЕН:"
 echo ""
 echo "Веб-интерфейсы:"
-echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, без пароля)"
+echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, правила активны)"
 echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет пустой, подключается сразу)"
-echo "                * Группа PROXY: по умолчанию активен 'AUTO' (автовыбор),"
-echo "                * Ручной выбор: просто кликните на нужный сервер в списке."
 echo "- SSH / Консоль: порт 22 (Пользователь: root, пароль пустой)"
 echo "=========================================================="
