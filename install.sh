@@ -44,7 +44,7 @@ echo "Параметры для применения:"
 echo "- IP устройства:  $ROUTER_IP"
 echo "- Шлюз сети:      $GATEWAY_IP"
 echo "- Базовый DNS:    $DNS_IP"
-echo "- Пароль root:    НЕ ИЗМЕНЯЕТСЯ (сохранен)"
+echo "- Авторизация:    ОТКЛЮЧЕНА (свободный вход в панели)"
 echo "- Подписка:       $SUB_URL"
 echo "- Автовыбор узла: Включен (AUTO url-test каждые 5 мин)"
 echo "- Автообновление: Включено (раз в 24 часа)"
@@ -73,6 +73,9 @@ net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 SYS_EOF
+
+# Сброс пароля root для входа без пароля
+passwd -d root 2>/dev/null || true
 
 echo "=== [2/7] Применение сетевых настроек и устранение конфликтов DHCP ==="
 killall udhcpc 2>/dev/null || true
@@ -212,29 +215,15 @@ tar -xzf /tmp/metacubexd.tar.gz -C /tmp/metaui_tmp
 cp -r /tmp/metaui_tmp/*/* /etc/mihomo/ui/
 rm -rf /tmp/metaui_tmp /tmp/metacubexd.tar.gz
 
-# Базы GeoIP и GeoSite с проверкой целостности
+# Базы GeoIP и GeoSite
 echo "Скачивание баз маршрутизации GeoIP и GeoSite..."
-curl -sL --connect-timeout 10 https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat -o /etc/mihomo/geoip.dat || true
-curl -sL --connect-timeout 10 https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat -o /etc/mihomo/geosite.dat || true
+curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat -o /etc/mihomo/geoip.dat
+curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat -o /etc/mihomo/geosite.dat
 
-[ -s /etc/mihomo/geoip.dat ] || echo "Предупреждение: geoip.dat пуст или не скачался"
-[ -s /etc/mihomo/geosite.dat ] || echo "Предупреждение: geosite.dat пуст или не скачался"
+# Предварительная загрузка подписки
+curl -sL -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml
 
-# Предварительная загрузка подписки с валидацией размера
-echo "Скачивание конфигурации провайдеров..."
-curl -sL --connect-timeout 10 -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml || true
-
-# Защита от поврежденной/пустой подписки
-if [ ! -s /etc/mihomo/providers/sub.yaml ] || [ "$(wc -c < /etc/mihomo/providers/sub.yaml)" -lt 50 ]; then
-    echo "Предупреждение: Не удалось скачать валидную подписку. Создаем резервный заглушечный узел..."
-    cat << 'FALLBACK_SUB_EOF' > /etc/mihomo/providers/sub.yaml
-proxies:
-  - name: "RESERVE-DIRECT"
-    type: direct
-FALLBACK_SUB_EOF
-fi
-
-echo "=== [5/7] Создание конфигурации Mihomo ==="
+echo "=== [5/7] Создание конфигурации Mihomo (Без секрета) ==="
 cat <<CONFIG_EOF > /etc/mihomo/config.yaml
 mixed-port: 7890
 allow-lan: true
@@ -293,8 +282,7 @@ tun:
   stack: mixed
   auto-route: true
   auto-redirect: false
-  auto-detect-interface: false
-  interface: br-lan
+  auto-detect-interface: true
 
 proxy-providers:
   my-subscription:
@@ -476,5 +464,5 @@ echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, бе�
 echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет пустой, подключается сразу)"
 echo "                * Группа PROXY: по умолчанию активен 'AUTO' (автовыбор),"
 echo "                * Ручной выбор: просто кликните на нужный сервер в списке."
-echo "- SSH / Консоль: порт 22 (Текущий пароль root сохранен)"
+echo "- SSH / Консоль: порт 22 (Пользователь: root, пароль пустой)"
 echo "=========================================================="
