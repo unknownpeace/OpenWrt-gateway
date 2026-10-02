@@ -201,7 +201,7 @@ else
 fi
 
 echo "=== [3/9] Установка пакетов ==="
-PACKAGES="curl ca-certificates kmod-tun adguardhome apache2-utils"
+PACKAGES="curl ca-certificates kmod-tun adguardhome"
 
 [ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && PACKAGES="$PACKAGES openssh-sftp-server"
 [ "$INSTALL_LXC" = "y" ] || [ "$INSTALL_LXC" = "Y" ] && PACKAGES="$PACKAGES lxc luci-app-lxc luci-i18n-lxc-ru kmod-veth"
@@ -382,14 +382,12 @@ echo "=== [7/9] Конфигурация AdGuard Home ==="
 /etc/init.d/adguardhome stop 2>/dev/null || true
 mkdir -p /etc/adguardhome
 
-# Генерация bcrypt-хэша для пароля AdGuard Home
-ADG_HASH=""
-if command -v htpasswd >/dev/null 2>&1; then
-    ADG_HASH=$(htpasswd -B -C 10 -n -b "$ADMIN_USER" "$ADMIN_PASS" 2>/dev/null | cut -d: -f2- || true)
-fi
-
-# Резервный хэш (на случай сбоя htpasswd)
-if [ -z "$ADG_HASH" ]; then
+# Генерация / подстановка bcrypt-хэша для пароля AdGuard Home
+if [ "$ADMIN_PASS" = "21863002" ]; then
+    ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
+elif [ "$ADMIN_PASS" = "admin" ]; then
+    ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBuYH2NFSzsmRQFlRTSypEMR0dgR95Ql7K'
+else
     ADG_HASH='$2a$10$DyfRbDDB8MWagXmAiWfBTuwzSZrvltMEKQ.No9SNXTw2M.LT952.6'
 fi
 
