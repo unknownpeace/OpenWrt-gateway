@@ -5,7 +5,7 @@ trap '' HUP
 clear
 echo "=========================================================="
 echo "    ИНТЕРАКТИВНЫЙ УСТАНОВЩИК ДОМАШНЕГО ШЛЮЗА OPENWRT (Z83)"
-echo "            (ЗАЩИТА И ПАРОЛИ: АКТИВИРОВАНЫ)               "
+echo "               (РЕЖИМ БЕЗ АВТОРИЗАЦИИ / NO-AUTH)          "
 echo "=========================================================="
 
 # Автоопределение текущего IP без маски подсети
@@ -15,14 +15,14 @@ DETECTED_IP=$(echo "$DETECTED_IP" | cut -d'/' -f1)
 DEFAULT_SUB_URL="https://gitlab.com/igareck/vpn-configs-for-russia/-/raw/main/Export/Clash/PROXIES_ONLY/BLACK_VLESS_RUS_mobile_clash_proxies.yaml"
 
 # 1. Запрос ссылки на подписку Clash (с дефолтом)
-echo "--- [1/3] Источник прокси-серверов ---"
+echo "--- [1/2] Источник прокси-серверов ---"
 printf "Введите ссылку на Clash-подписку\n[Enter для использования встроенной базы VLESS]:\n> "
 read -r INPUT_SUB_URL
 SUB_URL=${INPUT_SUB_URL:-$DEFAULT_SUB_URL}
 
 # 2. Сетевые параметры
 echo ""
-echo "--- [2/3] Сетевые параметры ---"
+echo "--- [2/2] Сетевые параметры ---"
 printf "IP-адрес этого OpenWrt [по умолчанию $DETECTED_IP]: "
 read -r INPUT_IP
 ROUTER_IP=${INPUT_IP:-$DETECTED_IP}
@@ -38,25 +38,10 @@ read -r INPUT_DNS
 DNS_IP=${INPUT_DNS:-77.88.8.8}
 DNS_IP=$(echo "$DNS_IP" | cut -d'/' -f1)
 
-# 3. Единая учетная запись (Master Credentials)
-echo ""
-echo "--- [3/3] Единые учетные данные (AdGuard, Samba, MetaCubeXD, Aria2) ---"
-printf "Введите имя пользователя (логин) [admin]: "
-read -r INPUT_USER
-ADMIN_USER=${INPUT_USER:-admin}
-
-printf "Введите пароль [21863002]: "
-read -r INPUT_PASS
-ADMIN_PASS=${INPUT_PASS:-21863002}
-
-printf "Установить этот же пароль для root в OpenWrt (SSH / LuCI)? [Y/n]: "
-read -r SET_ROOT_PASS
-SET_ROOT_PASS=${SET_ROOT_PASS:-Y}
-
-# 4. Дополнительные модули
+# 3. Дополнительные модули
 echo ""
 echo "--- Выбор дополнительных компонентов ---"
-printf "Установить сетевую папку KSMBD (SMB-шара с паролем)? [y/N]: "
+printf "Установить сетевую папку KSMBD (гостевой доступ без пароля)? [y/N]: "
 read -r INSTALL_SMB
 
 if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
@@ -65,7 +50,7 @@ if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
     SMB_PATH=${INPUT_SMB_PATH:-/mnt/share}
 fi
 
-printf "Установить качалку торрентов Aria2 + веб-панель AriaNg? [y/N]: "
+printf "Установить качалку торрентов Aria2 + веб-панель AriaNg (без пароля)? [y/N]: "
 read -r INSTALL_ARIA
 
 printf "Установить контейнеры LXC (lxc, luci-app-lxc)? [y/N]: "
@@ -80,9 +65,7 @@ echo "Параметры для применения:"
 echo "- IP устройства:  $ROUTER_IP"
 echo "- Шлюз сети:      $GATEWAY_IP"
 echo "- Базовый DNS:    $DNS_IP"
-echo "- Единый логин:   $ADMIN_USER"
-echo "- Единый пароль:  $ADMIN_PASS"
-echo "- Пароль root:    [${SET_ROOT_PASS}]"
+echo "- Авторизация:    ОТКЛЮЧЕНА ВЕЗДЕ (свободный доступ)"
 echo "- Подписка:       $SUB_URL"
 echo "- Автовыбор узла: Включен (AUTO url-test каждые 5 мин)"
 echo "- Автообновление: Включено (раз в 24 часа)"
@@ -113,11 +96,8 @@ net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 SYS_EOF
 
-# Установка пароля root (если выбрано)
-if [ "$SET_ROOT_PASS" = "y" ] || [ "$SET_ROOT_PASS" = "Y" ]; then
-    printf "%s\n%s\n" "$ADMIN_PASS" "$ADMIN_PASS" | passwd root 2>/dev/null || true
-    echo "Пароль root успешно обновлён!"
-fi
+# Сброс пароля root для входа без пароля
+passwd -d root 2>/dev/null || true
 
 echo "=== [2/9] Применение сетевых настроек и устранение конфликтов DHCP ==="
 killall udhcpc 2>/dev/null || true
@@ -276,7 +256,7 @@ curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geos
 # Предварительная загрузка подписки
 curl -sL -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml
 
-echo "=== [5/9] Создание конфигурации Mihomo ==="
+echo "=== [5/9] Создание конфигурации Mihomo (Без секрета) ==="
 cat <<CONFIG_EOF > /etc/mihomo/config.yaml
 mixed-port: 7890
 allow-lan: true
@@ -285,7 +265,7 @@ log-level: info
 ipv6: false
 external-controller: 0.0.0.0:9090
 external-ui: ui
-secret: "${ADMIN_PASS}"
+secret: ""
 
 geodata-mode: true
 geo-auto-update: true
@@ -399,29 +379,9 @@ start_service() {
 INIT_EOF
 chmod +x /etc/init.d/mihomo
 
-echo "=== [7/9] Конфигурация AdGuard Home ==="
+echo "=== [7/9] Конфигурация AdGuard Home (Без пользователей) ==="
 /etc/init.d/adguardhome stop 2>/dev/null || true
 mkdir -p /etc/adguardhome
-
-# Генерация / сопоставление bcrypt-хэша для пароля
-case "$ADMIN_PASS" in
-    21863002)
-        ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
-        ;;
-    anime)
-        ADG_HASH='$2b$10$Jtmc4tw7YF0AgJjKn6R5juflV0dBo0KMVz4n9Ly4rjyLWOoMSznL.'
-        ;;
-    admin)
-        ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBuYH2NFSzsmRQFlRTSypEMR0dgR95Ql7K'
-        ;;
-    root|password|12345678)
-        ADG_HASH='$2b$10$H8g1YfKz8LqXWzL6N5U6Ou1L2gZkM4mS2P1bT9hR5V0vX8zW1y2K.'
-        ;;
-    *)
-        # Дефолтный хэш от 21863002
-        ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
-        ;;
-esac
 
 cat << ADG_EOF > /etc/adguardhome/adguardhome.yaml
 http:
@@ -437,9 +397,7 @@ http:
     insecure_enabled: false
   address: 0.0.0.0:3000
   session_ttl: 30d
-users:
-  - name: ${ADMIN_USER}
-    password: "${ADG_HASH}"
+users: []
 auth_attempts: 5
 block_auth_min: 15
 http_proxy: ""
@@ -489,11 +447,9 @@ cp /etc/adguardhome/adguardhome.yaml /etc/adguardhome.yaml 2>/dev/null || true
 
 # 8. Настройка KSMBD (если выбрано)
 if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
-    echo "=== [8/9] Настройка KSMBD (Сетевой доступ к файлам) ==="
+    echo "=== [8/9] Настройка KSMBD (Гостевой доступ без пароля) ==="
     mkdir -p "$SMB_PATH"
     chmod -R 777 "$SMB_PATH"
-
-    printf "%s\n%s\n" "$ADMIN_PASS" "$ADMIN_PASS" | ksmbd.adduser -a "$ADMIN_USER" 2>/dev/null || ksmbd.adduser -a "$ADMIN_USER"
 
     uci delete ksmbd.share_main 2>/dev/null || true
     uci set ksmbd.share_main=share
@@ -501,11 +457,11 @@ if [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]; then
     uci set ksmbd.share_main.path="$SMB_PATH"
     uci set ksmbd.share_main.read_only='no'
     
-    # Авторизация по паролю
-    uci set ksmbd.share_main.guest_ok='no'
-    uci add_list ksmbd.share_main.users="$ADMIN_USER"
+    # Гостевой доступ без учетных записей
+    uci set ksmbd.share_main.guest_ok='yes'
+    uci delete ksmbd.share_main.users 2>/dev/null || true
 
-    # Права 0777 на создаваемые файлы
+    # Права 0777
     uci set ksmbd.share_main.create_mask='0777'
     uci set ksmbd.share_main.dir_mask='0777'
     uci set ksmbd.share_main.force_create_mode='0777'
@@ -527,12 +483,14 @@ sleep 4
 /etc/init.d/adguardhome restart 2>/dev/null || true
 sleep 3
 
-# Настройка и запуск Aria2 с токеном RPC
+# Настройка и запуск Aria2 (без токена RPC)
 if [ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ]; then
     uci set aria2.main.enabled='1'
     uci set aria2.main.dir="${SMB_PATH:-/mnt/share}"
     uci set aria2.main.enable_rpc='1'
-    uci set aria2.main.rpc_secret="$ADMIN_PASS"
+    uci delete aria2.main.rpc_secret 2>/dev/null || true
+    uci delete aria2.main.rpc_auth_method 2>/dev/null || true
+    uci set aria2.main.rpc_auth_method='none'
     uci commit aria2
     /etc/init.d/aria2 enable 2>/dev/null || true
     /etc/init.d/aria2 restart 2>/dev/null || true
@@ -574,16 +532,14 @@ else
 fi
 
 echo "=========================================================="
-echo "Управление (ЕДИНЫЕ УЧЕТНЫЕ ДАННЫЕ):"
-echo "- Логин:  $ADMIN_USER"
-echo "- Пароль: $ADMIN_PASS"
+echo "ВСЕ СЛУЖБЫ НАСТРОЕНЫ БЕЗ ПАРОЛЕЙ И АВТОРИЗАЦИИ:"
 echo ""
-echo "Ссылки:"
-echo "- AdGuard Home: http://$ROUTER_IP:3000 (Логин: $ADMIN_USER, Пароль: $ADMIN_PASS)"
-echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет: $ADMIN_PASS)"
+echo "Ссылки для перехода:"
+echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, пароль отключен)"
+echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет пустой, подключается сразу)"
 echo "                * Группа PROXY: по умолчанию активен 'AUTO' (автовыбор),"
 echo "                * Ручной выбор: просто кликните на нужный сервер в списке."
-[ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ] && echo "- AriaNg UI:    http://$ROUTER_IP/ariang (Токен RPC: $ADMIN_PASS)"
-[ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]   && echo "- Сетевая папка:\\\\$ROUTER_IP\\Share (Логин: $ADMIN_USER, Пароль: $ADMIN_PASS)"
-[ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && echo "- SFTP / SSH:   порт 22 (Пользователь: root, Пароль: $ADMIN_PASS)"
+[ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ] && echo "- AriaNg UI:    http://$ROUTER_IP/ariang (Токен RPC пустой)"
+[ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]   && echo "- Сетевая папка:\\\\$ROUTER_IP\\Share (Гостевой доступ без логина и пароля)"
+[ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && echo "- SFTP / SSH:   порт 22 (Пользователь: root, пароль пустой)"
 echo "=========================================================="
