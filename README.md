@@ -9,7 +9,7 @@
 Подключитесь к роутеру по SSH и вставьте команду:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/unknownpeace/OpenWrt-gateway/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh
+(which curl >/dev/null && curl -sL https://raw.githubusercontent.com/unknownpeace/OpenWrt-gateway/main/install.sh -o install.sh || wget -qO install.sh https://raw.githubusercontent.com/unknownpeace/OpenWrt-gateway/main/install.sh) && sh install.sh
 ```
 
 ---
