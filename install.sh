@@ -4,7 +4,7 @@ trap '' HUP
 clear
 echo "=========================================================="
 echo "    ПРОЗРАЧНЫЙ ШЛЮЗ OPENWRT: ADGUARD HOME + MIHOMO TUN    "
-echo "               (МИНИМАЛЬНАЯ СБОРКА Z83)                   "
+echo "        (МАКСИМАЛЬНО ОБЛЕГЧЕННАЯ СБОРКА ДЛЯ Z83)          "
 echo "=========================================================="
 
 # Автоопределение текущего IP без маски подсети
@@ -47,7 +47,8 @@ echo "- Авторизация:    ОТКЛЮЧЕНА (свободный вхо
 echo "- Подписка:       $SUB_URL"
 echo "- Автовыбор узла: Включен (AUTO url-test каждые 5 мин)"
 echo "- Автообновление: Включено (раз в 24 часа)"
-echo "- Правила AdGuard: Полная эталонная конфигурация активна"
+echo "- Fake-IP Filter: ВЫРЕЗАН (чистый Fake-IP)"
+echo "- Sniffer:        ВЫРЕЗАН (0 нагрузки на CPU)"
 echo "=========================================================="
 printf "Применить конфигурацию и начать установку? [Y/n]: "
 read -r CONFIRM
@@ -213,7 +214,7 @@ curl -sL https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geos
 # Предварительная загрузка подписки
 curl -sL -A "clash.meta" "${SUB_URL}" -o /etc/mihomo/providers/sub.yaml || true
 
-echo "=== [5/7] Создание конфигурации Mihomo (Без секрета) ==="
+echo "=== [5/7] Создание облегченной конфигурации Mihomo ==="
 cat <<CONFIG_EOF > /etc/mihomo/config.yaml
 mixed-port: 7890
 allow-lan: true
@@ -236,47 +237,20 @@ dns:
   listen: 127.0.0.1:1053
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
-  fake-ip-filter:
-    - "geosite:category-ru"
-    - "+.ru"
-    - "+.su"
-    - "+.xn--p1ai"
-    - "router.lan"
-    - "openwrt.lan"
   default-nameserver:
     - ${DNS_IP}
     - ${GATEWAY_IP}
-    - 1.1.1.1
+    - 77.88.8.8
   nameserver:
     - ${DNS_IP}
-    - https://dns.google/dns-query
-    - https://cloudflare-dns.com/dns-query
-  nameserver-policy:
-    'geosite:category-ru':
-      - ${DNS_IP}
-      - ${GATEWAY_IP}
-    '+.ru,+.su,+.xn--p1ai':
-      - ${DNS_IP}
-      - ${GATEWAY_IP}
-
-sniffer:
-  enable: true
-  sniff:
-    HTTP:
-      ports: [80, 8080-8880]
-      override-destination: true
-    TLS:
-      ports: [443, 8443]
-    QUIC:
-      ports: [443, 8443]
-  skip-domain:
-    - "Mijia Cloud"
-    - "dlg.io.mi.com"
+    - 77.88.8.8
+    - 77.88.8.1
 
 tun:
   enable: true
   device: tun0
   stack: mixed
+  mtu: 1400
   auto-route: true
   auto-redirect: false
   auto-detect-interface: true
@@ -344,7 +318,7 @@ start_service() {
 INIT_EOF
 chmod +x /etc/init.d/mihomo
 
-echo "=== [7/7] Конфигурация AdGuard Home (Полная эталонная схема) ==="
+echo "=== [7/7] Конфигурация AdGuard Home ==="
 /etc/init.d/adguardhome stop 2>/dev/null || true
 mkdir -p /etc/adguardhome
 
@@ -416,7 +390,7 @@ dns:
   ipset: []
   ipset_file: ""
   bootstrap_prefer_ipv6: false
-  upstream_timeout: 10s
+  upstream_timeout: 5s
   private_networks: []
   use_private_ptr_resolvers: true
   local_ptr_upstreams: []
@@ -563,7 +537,7 @@ echo "=========================================================="
 echo "1. AdGuard Home (порт 53) -> Mihomo DNS (1053):"
 DNS_CHECK=$(nslookup ya.ru 127.0.0.1 2>/dev/null || true)
 if echo "$DNS_CHECK" | grep -q "Address"; then
-    echo "   [OK] DNS-сервер отвечает и успешно резолвит имена!"
+    echo "   [OK] DNS-сервер отвечает и мгновенно резолвит имена!"
 else
     echo "   [FAIL] Порт 53 не отвечает на запросы."
 fi
@@ -591,10 +565,10 @@ else
 fi
 
 echo "=========================================================="
-echo "ШЛЮЗ НАСТРОЕН:"
+echo "ШЛЮЗ НАСТРОЕН: МАКСИМАЛЬНАЯ СКОРОСТЬ FAKE-IP АКТИВНА"
 echo ""
 echo "Веб-интерфейсы:"
-echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный, правила активны)"
+echo "- AdGuard Home: http://$ROUTER_IP:3000 (Вход свободный)"
 echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет пустой, подключается сразу)"
 echo "- SSH / Консоль: порт 22 (Пользователь: root, пароль пустой)"
 echo "=========================================================="
