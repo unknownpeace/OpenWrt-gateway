@@ -12,16 +12,17 @@ echo "=========================================================="
 DETECTED_IP=$(uci -q get network.lan.ipaddr || ip -4 addr show dev br-lan 2>/dev/null | grep -o 'inet [0-9.]*' | awk '{print $2}' | head -n 1 || echo "192.168.1.1")
 DETECTED_IP=$(echo "$DETECTED_IP" | cut -d'/' -f1)
 
-# 1. Запрос ссылки на подписку Clash
-while [ -z "$SUB_URL" ]; do
-    printf "Введите ссылку на Clash-подписку: "
-    read -r SUB_URL
-    [ -z "$SUB_URL" ] && echo "Ошибка: ссылка не может быть пустой!"
-done
+DEFAULT_SUB_URL="https://gitlab.com/igareck/vpn-configs-for-russia/-/raw/main/Export/Clash/PROXIES_ONLY/BLACK_VLESS_RUS_mobile_clash_proxies.yaml"
+
+# 1. Запрос ссылки на подписку Clash (с дефолтом)
+echo "--- [1/3] Источник прокси-серверов ---"
+printf "Введите ссылку на Clash-подписку\n[Enter для использования встроенной базы VLESS]:\n> "
+read -r INPUT_SUB_URL
+SUB_URL=${INPUT_SUB_URL:-$DEFAULT_SUB_URL}
 
 # 2. Сетевые параметры
 echo ""
-echo "--- [1/3] Сетевые параметры ---"
+echo "--- [2/3] Сетевые параметры ---"
 printf "IP-адрес этого OpenWrt [по умолчанию $DETECTED_IP]: "
 read -r INPUT_IP
 ROUTER_IP=${INPUT_IP:-$DETECTED_IP}
@@ -39,7 +40,7 @@ DNS_IP=$(echo "$DNS_IP" | cut -d'/' -f1)
 
 # 3. Единая учетная запись (Master Credentials)
 echo ""
-echo "--- [2/3] Единые учетные данные (AdGuard, Samba, MetaCubeXD, Aria2) ---"
+echo "--- [3/3] Единые учетные данные (AdGuard, Samba, MetaCubeXD, Aria2) ---"
 printf "Введите имя пользователя (логин) [admin]: "
 read -r INPUT_USER
 ADMIN_USER=${INPUT_USER:-admin}
@@ -54,7 +55,7 @@ SET_ROOT_PASS=${SET_ROOT_PASS:-Y}
 
 # 4. Дополнительные модули
 echo ""
-echo "--- [3/3] Выбор дополнительных компонентов ---"
+echo "--- Выбор дополнительных компонентов ---"
 printf "Установить сетевую папку KSMBD (SMB-шара с паролем)? [y/N]: "
 read -r INSTALL_SMB
 
@@ -83,6 +84,8 @@ echo "- Единый логин:   $ADMIN_USER"
 echo "- Единый пароль:  $ADMIN_PASS"
 echo "- Пароль root:    [${SET_ROOT_PASS}]"
 echo "- Подписка:       $SUB_URL"
+echo "- Автовыбор узла: Включен (AUTO url-test каждые 5 мин)"
+echo "- Автообновление: Включено (раз в 24 часа)"
 echo "- Компоненты:     KSMBD=[${INSTALL_SMB:-N}], Aria2=[${INSTALL_ARIA:-N}], LXC=[${INSTALL_LXC:-N}], SFTP=[${INSTALL_SFTP:-Y}]"
 echo "=========================================================="
 printf "Применить конфигурацию и начать установку? [Y/n]: "
@@ -348,8 +351,20 @@ proxy-providers:
 proxy-groups:
   - name: "PROXY"
     type: select
+    proxies:
+      - "AUTO"
+      - DIRECT
     use:
       - my-subscription
+
+  - name: "AUTO"
+    type: url-test
+    use:
+      - my-subscription
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    lazy: false
 
 rules:
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
@@ -403,7 +418,7 @@ case "$ADMIN_PASS" in
         ADG_HASH='$2b$10$H8g1YfKz8LqXWzL6N5U6Ou1L2gZkM4mS2P1bT9hR5V0vX8zW1y2K.'
         ;;
     *)
-        # Безопасный дефолт на 21863002
+        # Дефолтный хэш от 21863002
         ADG_HASH='$2b$10$U55iXJXMuFGiGMVMFT2QBugZ8xP6OyH2Om0pXBpf3TSh5SYDwCpeu'
         ;;
 esac
@@ -563,9 +578,11 @@ echo "Управление (ЕДИНЫЕ УЧЕТНЫЕ ДАННЫЕ):"
 echo "- Логин:  $ADMIN_USER"
 echo "- Пароль: $ADMIN_PASS"
 echo ""
-echo "Ссылки для перехода:"
+echo "Ссылки:"
 echo "- AdGuard Home: http://$ROUTER_IP:3000 (Логин: $ADMIN_USER, Пароль: $ADMIN_PASS)"
 echo "- MetaCubeXD:   http://$ROUTER_IP:9090/ui (Секрет: $ADMIN_PASS)"
+echo "                * Группа PROXY: по умолчанию активен 'AUTO' (автовыбор),"
+echo "                * Ручной выбор: просто кликните на нужный сервер в списке."
 [ "$INSTALL_ARIA" = "y" ] || [ "$INSTALL_ARIA" = "Y" ] && echo "- AriaNg UI:    http://$ROUTER_IP/ariang (Токен RPC: $ADMIN_PASS)"
 [ "$INSTALL_SMB" = "y" ] || [ "$INSTALL_SMB" = "Y" ]   && echo "- Сетевая папка:\\\\$ROUTER_IP\\Share (Логин: $ADMIN_USER, Пароль: $ADMIN_PASS)"
 [ "$INSTALL_SFTP" != "n" ] && [ "$INSTALL_SFTP" != "N" ] && echo "- SFTP / SSH:   порт 22 (Пользователь: root, Пароль: $ADMIN_PASS)"
